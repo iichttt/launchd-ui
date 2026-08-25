@@ -9,7 +9,6 @@ import Observation
 final class JobsModel {
     private(set) var jobs: [JobListEntry] = []
     private(set) var loading = true
-    private(set) var loadError: String?
     private(set) var actionError: String?
 
     var search = ""
@@ -35,7 +34,6 @@ final class JobsModel {
     /// main actor; only the resulting state is published back.
     func refresh() async {
         loading = true
-        loadError = nil
         let result = await Task.detached { JobService.listJobs() }.value
         jobs = result
         loading = false

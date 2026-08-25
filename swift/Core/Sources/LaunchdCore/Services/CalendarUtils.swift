@@ -73,31 +73,68 @@ public enum CalendarUtils {
         return intervals.map(formatSingle).joined(separator: ", ")
     }
 
-    /// Next `count` firings of one interval, scanned minute by minute the way the
-    /// TypeScript original did (bounded to ~400 days so an impossible spec terminates).
+    /// Next `count` firings of one interval.
+    ///
+    /// launchd treats an omitted field as a wildcard, so an interval with only `hour`
+    /// set fires every minute of that hour; the search therefore works at minute
+    /// granularity like the TypeScript original, and is bounded to ~400 days so an
+    /// impossible spec (Feb 30) terminates.
+    ///
+    /// Rather than testing all 576,000 minutes in that window, it skips runs of
+    /// candidates that provably cannot match: a day whose date fields are wrong is
+    /// skipped whole, and a wrong minute jumps straight to the next matching minute.
+    /// Every jump goes through `Calendar`, so DST transitions stay correct.
     public static func nextOccurrences(_ ci: CalendarInterval, count: Int) -> [Date] {
         var results: [Date] = []
         let calendar = Calendar.current
-        var candidate = calendar.date(
-            bySetting: .second, value: 0, of: Date()) ?? Date()
-        candidate = calendar.date(byAdding: .minute, value: 1, to: candidate) ?? candidate
+        // Truncate to the start of the current minute, then begin at the next one.
+        // Rebuilding from components drops seconds and the sub-second fraction, so
+        // results land on exact minute boundaries rather than inheriting "now".
+        let unit: Set<Calendar.Component> = [.year, .month, .day, .hour, .minute]
+        guard let thisMinute = calendar.date(from: calendar.dateComponents(unit, from: Date())),
+              var candidate = calendar.date(byAdding: .minute, value: 1, to: thisMinute)
+        else { return results }
 
-        let limit = 400 * 24 * 60
-        var i = 0
-        while i < limit && results.count < count {
+        guard let deadline = calendar.date(byAdding: .day, value: 400, to: candidate) else {
+            return results
+        }
+
+        while candidate < deadline && results.count < count {
             let parts = calendar.dateComponents(
                 [.month, .day, .weekday, .hour, .minute], from: candidate)
-            let matches =
+
+            // Calendar.weekday is 1-based (Sunday == 1); launchd's Weekday is 0-based.
+            let dayMatches =
                 (ci.month == nil || parts.month == ci.month)
                 && (ci.day == nil || parts.day == ci.day)
-                // Calendar.weekday is 1-based (Sunday == 1); launchd's Weekday is 0-based.
                 && (ci.weekday == nil || (parts.weekday.map { $0 - 1 }) == ci.weekday)
-                && (ci.hour == nil || parts.hour == ci.hour)
-                && (ci.minute == nil || parts.minute == ci.minute)
 
-            if matches { results.append(candidate) }
-            candidate = calendar.date(byAdding: .minute, value: 1, to: candidate) ?? candidate
-            i += 1
+            // No time on this date can match, so skip to the next midnight.
+            if !dayMatches {
+                guard let next = calendar.date(
+                    byAdding: .day, value: 1, to: calendar.startOfDay(for: candidate))
+                else { break }
+                candidate = next
+                continue
+            }
+
+            // Minute-of-hour advances cyclically regardless of DST, so the next
+            // candidate with the wanted minute is exactly this far ahead.
+            if let wanted = ci.minute, let current = parts.minute, current != wanted {
+                guard let next = calendar.date(
+                    byAdding: .minute, value: (wanted - current + 60) % 60, to: candidate)
+                else { break }
+                candidate = next
+                continue
+            }
+
+            if ci.hour == nil || parts.hour == ci.hour {
+                results.append(candidate)
+            }
+
+            guard let next = calendar.date(byAdding: .minute, value: 1, to: candidate)
+            else { break }
+            candidate = next
         }
         return results
     }

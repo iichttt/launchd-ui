@@ -23,12 +23,18 @@ struct LogViewerView: View {
                         .font(.caption).foregroundStyle(.secondary).fixedSize()
                 }
                 Spacer(minLength: 8)
-                Button("Refresh") { load() }.disabled(loading)
+                Button("Refresh") { Task { await load() } }.disabled(loading)
                 Button("Clear") {
-                    try? JobService.clearLogFile(path: logPath)
-                    load()
+                    Task {
+                        do { try JobService.clearLogFile(path: logPath) }
+                        catch { self.error = error.localizedDescription; return }
+                        await load()
+                    }
                 }
-                Button("Open in Editor") { try? JobService.openLogInEditor(path: logPath) }
+                Button("Open in Editor") {
+                    do { try JobService.openLogInEditor(path: logPath) }
+                    catch { self.error = error.localizedDescription }
+                }
             }
             .buttonStyle(.borderless)
             .font(.caption)
@@ -48,14 +54,20 @@ struct LogViewerView: View {
                 .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
             }
         }
-        .onAppear(perform: load)
+        .task { await load() }
     }
 
-    private func load() {
+    /// Reads the log off the main actor: the whole file is pulled into memory to take
+    /// its tail, which stalls the UI on a log that an agent has let grow.
+    private func load() async {
         loading = true
         error = nil
+        let path = logPath
+        let lines = tailLines
         do {
-            let result = try JobService.readLogFile(path: logPath, tailLines: tailLines)
+            let result = try await Task.detached {
+                try JobService.readLogFile(path: path, tailLines: lines)
+            }.value
             content = result.content
             modifiedAt = result.modifiedAt.map { Date(timeIntervalSince1970: $0 / 1000) }
         } catch {

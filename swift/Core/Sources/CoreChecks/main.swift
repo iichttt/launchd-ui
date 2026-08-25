@@ -144,6 +144,37 @@ Check.suite("calendar intervals") {
     Check.expect(zip(merged, merged.dropFirst()).allSatisfy { $0 < $1 }, "multi results are sorted")
     Check.equal(Set(merged).count, merged.count, "multi results are deduplicated")
 
+    // The occurrence search skips runs of candidates that cannot match rather than
+    // testing every minute in a 400-day window; these pin the skipped paths down.
+    let impossible = CalendarUtils.nextOccurrences(
+        CalendarInterval(minute: 0, hour: 0, day: 30, month: 2), count: 5)
+    Check.expect(impossible.isEmpty, "an impossible date (Feb 30) terminates with no occurrences")
+
+    let yearly = CalendarUtils.nextOccurrences(
+        CalendarInterval(minute: 0, hour: 0, day: 1, month: 1), count: 5)
+    Check.expect(yearly.count == 1, "a yearly schedule finds its one firing inside 400 days")
+    Check.expect(yearly.allSatisfy {
+        let c = Calendar.current.dateComponents([.month, .day, .hour, .minute], from: $0)
+        return c.month == 1 && c.day == 1 && c.hour == 0 && c.minute == 0
+    }, "the yearly firing lands on Jan 1 00:00")
+
+    let dayOfMonth = CalendarUtils.nextOccurrences(
+        CalendarInterval(minute: 0, hour: 12, day: 29), count: 3)
+    Check.equal(dayOfMonth.count, 3, "a day-of-month schedule yields occurrences")
+    Check.expect(dayOfMonth.allSatisfy { Calendar.current.component(.day, from: $0) == 29 },
+                 "day-of-month occurrences all land on the 29th")
+
+    // A nil minute is a wildcard, so consecutive minutes of the matching hour fire.
+    let wildcardMinute = CalendarUtils.nextOccurrences(CalendarInterval(hour: 23), count: 3)
+    Check.equal(wildcardMinute.count, 3, "a nil minute still yields occurrences")
+    Check.expect(wildcardMinute.allSatisfy { Calendar.current.component(.hour, from: $0) == 23 },
+                 "a nil minute fires every minute of the given hour")
+
+    Check.expect(
+        CalendarUtils.nextOccurrences(CalendarInterval(minute: 0), count: 3)
+            .allSatisfy { Calendar.current.component(.second, from: $0) == 0 },
+        "occurrences land on exact minute boundaries")
+
     Check.equal(CalendarUtils.format((7...9).map { CalendarInterval(minute: 0, hour: $0) }),
                 "Every day at :00 (7:00–9:00)", "formats a detected hour range")
     Check.equal(CalendarUtils.format([CalendarInterval(minute: 5, hour: 9, weekday: 1)]),

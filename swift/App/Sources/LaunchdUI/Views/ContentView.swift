@@ -14,7 +14,7 @@ struct ContentView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
 
-            if let error = model.loadError ?? model.actionError {
+            if let error = model.actionError {
                 ErrorBanner(message: error) { model.clearActionError() }
                     .padding(.horizontal, 12)
                     .padding(.bottom, 8)

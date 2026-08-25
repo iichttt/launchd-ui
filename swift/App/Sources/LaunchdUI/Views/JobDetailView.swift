@@ -49,7 +49,9 @@ struct JobDetailView: View {
         }
         .frame(width: 640, height: 620)
         .task {
-            do { job = try JobService.jobDetail(plistPath: plistPath) }
+            // jobDetail spawns `launchctl list`, so it must not run on the main actor.
+            let path = plistPath
+            do { job = try await Task.detached { try JobService.jobDetail(plistPath: path) }.value }
             catch { loadError = error.localizedDescription }
         }
     }
