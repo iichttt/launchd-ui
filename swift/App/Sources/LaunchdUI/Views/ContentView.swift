@@ -38,9 +38,6 @@ struct ContentView: View {
         }
         .frame(minWidth: 860, minHeight: 520)
         .toolbar {
-            ToolbarItem(placement: .navigation) {
-                Text("launchd-ui").font(.headline)
-            }
             ToolbarItemGroup {
                 Button {
                     Task { await model.refresh() }
