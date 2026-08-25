@@ -12,7 +12,11 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
-APP_NAME="LaunchdUI"
+# PRODUCT is the SwiftPM product and the Mach-O filename inside the bundle; it must
+# match CFBundleExecutable. APP_NAME is only the user-visible bundle name, so the two
+# differ and cannot be collapsed into one variable.
+PRODUCT="LaunchdUI"
+APP_NAME="Launchd UI"
 BUNDLE="$ROOT/build/$APP_NAME.app"
 
 # "-" is codesign's ad-hoc identity: valid signature, no certificate required.
@@ -39,10 +43,10 @@ MSG
 fi
 
 # --- Build -----------------------------------------------------------------------------
-echo "==> Building $APP_NAME (release)"
+echo "==> Building $PRODUCT (release)"
 cd "$ROOT/App"
-swift build -c release --product "$APP_NAME"
-BINARY="$(swift build -c release --product "$APP_NAME" --show-bin-path)/$APP_NAME"
+swift build -c release --product "$PRODUCT"
+BINARY="$(swift build -c release --product "$PRODUCT" --show-bin-path)/$PRODUCT"
 cd "$ROOT"
 
 [ -f "$BINARY" ] || { echo "error: binary not found at $BINARY" >&2; exit 1; }
@@ -51,7 +55,7 @@ cd "$ROOT"
 echo "==> Assembling $BUNDLE"
 rm -rf "$BUNDLE"
 mkdir -p "$BUNDLE/Contents/MacOS" "$BUNDLE/Contents/Resources"
-cp "$BINARY" "$BUNDLE/Contents/MacOS/$APP_NAME"
+cp "$BINARY" "$BUNDLE/Contents/MacOS/$PRODUCT"
 cp "$ROOT/Resources/Info.plist" "$BUNDLE/Contents/Info.plist"
 [ -f "$ROOT/Resources/AppIcon.icns" ] && cp "$ROOT/Resources/AppIcon.icns" "$BUNDLE/Contents/Resources/"
 
@@ -68,7 +72,7 @@ fi
 codesign --force --deep \
     --sign "$SIGN_IDENTITY" \
     --options=runtime \
-    --entitlements "$ROOT/Resources/$APP_NAME.entitlements" \
+    --entitlements "$ROOT/Resources/$PRODUCT.entitlements" \
     --timestamp"$([ "$SIGN_IDENTITY" = "-" ] && echo "=none")" \
     "$BUNDLE"
 
@@ -86,7 +90,7 @@ fi
 if [ "$NOTARIZE" = "1" ]; then
     : "${NOTARY_PROFILE:?set NOTARY_PROFILE to a notarytool keychain profile}"
     echo "==> Notarizing"
-    ZIP="$ROOT/build/$APP_NAME.zip"
+    ZIP="$ROOT/build/$PRODUCT.zip"
     ditto -c -k --keepParent "$BUNDLE" "$ZIP"
     xcrun notarytool submit "$ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
     xcrun stapler staple "$BUNDLE"
