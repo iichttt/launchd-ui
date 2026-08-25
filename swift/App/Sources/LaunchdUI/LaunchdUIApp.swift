@@ -4,7 +4,7 @@ import SwiftUI
 @main
 struct LaunchdUIApp: App {
     var body: some Scene {
-        Window("launchd-ui", id: "main") {
+        Window("Launchd UI", id: "main") {
             ContentView()
         }
         .windowToolbarStyle(.unified)
