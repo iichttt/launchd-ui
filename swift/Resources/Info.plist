@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleName</key>
-	<string>launchd-ui</string>
+	<string>Launchd UI</string>
 	<key>CFBundleDisplayName</key>
-	<string>launchd-ui</string>
+	<string>Launchd UI</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.iichttt.launchd-ui</string>
 	<key>CFBundleExecutable</key>
