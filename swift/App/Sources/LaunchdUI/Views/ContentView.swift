@@ -8,35 +8,51 @@ struct ContentView: View {
     @State private var creatingJob = false
     @State private var deleteTarget: JobListEntry?
 
+    /// List selection is optional; the model's filter is not, so a nil selection
+    /// (clicking empty sidebar space) is ignored rather than clearing the filter.
+    private var filterSelection: Binding<SourceFilter?> {
+        Binding(
+            get: { model.sourceFilter },
+            set: { if let new = $0 { model.sourceFilter = new } })
+    }
+
     var body: some View {
-        VStack(spacing: 0) {
-            SearchBarView(search: $model.search, sourceFilter: $model.sourceFilter)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-
-            if let error = model.actionError {
-                ErrorBanner(message: error) { model.clearActionError() }
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 8)
+        NavigationSplitView {
+            List(selection: filterSelection) {
+                Section("Source") {
+                    ForEach(SourceFilter.allCases, id: \.self) { filter in
+                        Label(filter.title, systemImage: filter.symbolName)
+                            .tag(filter)
+                    }
+                }
             }
+            .navigationSplitViewColumnWidth(min: 170, ideal: 190, max: 260)
+        } detail: {
+            VStack(spacing: 0) {
+                if let error = model.actionError {
+                    ErrorBanner(message: error) { model.clearActionError() }
+                        .padding(.horizontal, 12)
+                        .padding(.top, 10)
+                        .padding(.bottom, 8)
+                    Divider()
+                }
 
-            Divider()
-
-            JobListView(
-                jobs: model.filteredJobs,
-                loading: model.loading,
-                onStart: { job in Task { await model.perform { try JobService.startJob(plistPath: job.plistPath) } } },
-                onStop: { job in Task { await model.perform { try JobService.stopJob(plistPath: job.plistPath) } } },
-                onRestart: { job in Task { await model.perform { try JobService.restartJob(plistPath: job.plistPath) } } },
-                onKickstart: { job in
-                    Task { await model.perform { try JobService.kickstartJob(label: job.label, plistPath: job.plistPath) } }
-                },
-                onDelete: { deleteTarget = $0 },
-                onSelect: { detailJob = $0 },
-                onReveal: { job in try? JobService.revealInFinder(path: job.plistPath) }
-            )
+                JobListView(
+                    jobs: model.filteredJobs,
+                    loading: model.loading,
+                    onStart: { job in Task { await model.perform { try JobService.startJob(plistPath: job.plistPath) } } },
+                    onStop: { job in Task { await model.perform { try JobService.stopJob(plistPath: job.plistPath) } } },
+                    onRestart: { job in Task { await model.perform { try JobService.restartJob(plistPath: job.plistPath) } } },
+                    onKickstart: { job in
+                        Task { await model.perform { try JobService.kickstartJob(label: job.label, plistPath: job.plistPath) } }
+                    },
+                    onDelete: { deleteTarget = $0 },
+                    onSelect: { detailJob = $0 },
+                    onReveal: { job in try? JobService.revealInFinder(path: job.plistPath) }
+                )
+            }
+            .frame(minWidth: 660, minHeight: 520)
         }
-        .frame(minWidth: 860, minHeight: 520)
         .toolbar {
             ToolbarItemGroup {
                 Button {
@@ -53,6 +69,10 @@ struct ContentView: View {
                     Label("New Agent", systemImage: "plus")
                 }
                 .help("New Agent")
+            }
+            // Last item, so it sits at the trailing edge of the toolbar.
+            ToolbarItem {
+                ExpandingSearchField(text: $model.search)
             }
         }
         .task { await model.refresh() }
@@ -117,32 +137,14 @@ struct ErrorBanner: View {
     }
 }
 
-struct SearchBarView: View {
-    @Binding var search: String
-    @Binding var sourceFilter: SourceFilter
-
-    var body: some View {
-        HStack(spacing: 12) {
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Search agents...", text: $search)
-                    .textFieldStyle(.plain)
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary.opacity(0.5)))
-            .frame(maxWidth: 320)
-
-            Picker("", selection: $sourceFilter) {
-                ForEach(SourceFilter.allCases, id: \.self) { filter in
-                    Text(filter.title).tag(filter)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(maxWidth: 380)
-
-            Spacer()
+extension SourceFilter {
+    var symbolName: String {
+        switch self {
+        case .all: "square.grid.2x2"
+        case .userAgent: "person"
+        case .home: "house"
+        case .systemAgent: "gearshape"
+        case .systemDaemon: "server.rack"
         }
     }
 }
