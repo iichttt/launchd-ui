@@ -24,27 +24,42 @@ struct LogViewerView: View {
                         .font(.caption).foregroundStyle(.secondary).fixedSize()
                 }
                 Spacer(minLength: 8)
-                Button("Refresh") { Task { await load() } }.disabled(loading)
-                Button("Clear") {
+                Button {
+                    Task { await load() }
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+                .disabled(loading)
+
+                Button {
                     Task {
                         do { try JobService.clearLogFile(path: logPath) }
                         catch { self.error = error.localizedDescription; return }
                         await load()
                     }
+                } label: {
+                    Label("Clear", systemImage: "trash")
                 }
-                Button("Open in Editor") {
+
+                Button {
                     do { try JobService.openLogInEditor(path: logPath) }
                     catch { self.error = error.localizedDescription }
+                } label: {
+                    Label("Open in Editor", systemImage: "square.and.pencil")
                 }
             }
-            .buttonStyle(.borderless)
-            .font(.caption)
+            // Borderless caption text read as a label rather than a control; a bordered
+            // small button is the standard affordance for an inline action row.
+            .buttonStyle(.bordered)
+            .controlSize(.small)
 
             if let error {
                 Text(error).font(.callout).foregroundStyle(.red)
             } else {
+                // The log owns its pane now instead of sharing a scrolling column with
+                // a second one, so it takes whatever height the window offers.
                 LogTextView(text: content.isEmpty ? "(empty)" : content)
-                    .frame(height: 220)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .task { await load() }

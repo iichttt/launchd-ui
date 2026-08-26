@@ -32,12 +32,21 @@ public enum CommandBuilder {
         let target = "\(domain)/\(shellQuote(job.label))"
         let plistPath = shellQuote(job.plistPath)
 
+        // Enable and Disable have no equivalent anywhere in the UI, so every job lists
+        // them. The rest only earn their place on the read-only system jobs, where a
+        // copied sudo command is the sole way to act; for a user agent they merely
+        // restate the row buttons that already do the job in-app.
+        let enablement = [
+            CommandRow(label: "Enable", command: "\(prefix)launchctl enable \(target)"),
+            CommandRow(label: "Disable", command: "\(prefix)launchctl disable \(target)"),
+        ]
+        guard job.source != .userAgent else { return enablement }
+
         return [
             CommandRow(label: "Start", command: "\(prefix)launchctl bootstrap \(domain) \(plistPath)"),
             CommandRow(label: "Stop", command: "\(prefix)launchctl bootout \(domain) \(plistPath)"),
             CommandRow(label: "Kickstart", command: "\(prefix)launchctl kickstart -k \(target)"),
-            CommandRow(label: "Enable", command: "\(prefix)launchctl enable \(target)"),
-            CommandRow(label: "Disable", command: "\(prefix)launchctl disable \(target)"),
+        ] + enablement + [
             CommandRow(label: "Remove", command: "\(prefix)rm \(plistPath)", destructive: true),
         ]
     }

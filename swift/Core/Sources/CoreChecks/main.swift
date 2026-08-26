@@ -219,18 +219,52 @@ Check.suite("command builder") {
     }
 
     let userCommands = CommandBuilder.commands(for: job(.userAgent))
-    let start = userCommands.first { $0.label == "Start" }
-    Check.expect(start?.command.hasPrefix("launchctl bootstrap gui/$(id -u) ") == true,
-                 "user agents bootstrap into the gui domain")
-    Check.expect(start?.command.contains("sudo") == false, "user agents need no sudo")
+    Check.equal(userCommands.map(\.label), ["Enable", "Disable"],
+                "a user agent lists only the commands the UI cannot run itself")
+    Check.equal(userCommands.first { $0.label == "Enable" }?.command,
+                "launchctl enable gui/$(id -u)/com.example.agent",
+                "user agents target the gui domain without sudo")
 
     let daemonCommands = CommandBuilder.commands(for: job(.systemDaemon))
+    Check.equal(daemonCommands.map(\.label),
+                ["Start", "Stop", "Kickstart", "Enable", "Disable", "Remove"],
+                "read-only system jobs keep the full set")
+    Check.expect(
+        daemonCommands.first { $0.label == "Start" }?.command
+            .hasPrefix("sudo launchctl bootstrap system ") == true,
+        "system daemons bootstrap into the system domain with sudo")
     Check.equal(daemonCommands.first { $0.label == "Kickstart" }?.command,
                 "sudo launchctl kickstart -k system/com.example.agent",
                 "system daemons use the system domain with sudo")
 
-    Check.expect(userCommands.first { $0.label == "Remove" }?.destructive == true,
+    Check.expect(daemonCommands.first { $0.label == "Remove" }?.destructive == true,
                  "remove is marked destructive")
+}
+
+// MARK: - Log streams
+
+Check.suite("log streams") {
+    func config(out: String?, err: String?) -> PlistConfig {
+        var c = PlistConfig(label: "com.example.agent")
+        c.standardOutPath = out
+        c.standardErrorPath = err
+        return c
+    }
+
+    Check.equal(config(out: nil, err: nil).logStreams.map(\.title), [],
+                "a job with no log paths has no log tabs")
+    Check.equal(config(out: "/tmp/a.log", err: nil).logStreams.map(\.title), ["Output"],
+                "stdout alone is the only stream")
+    Check.equal(config(out: nil, err: "/tmp/e.log").logStreams.map(\.title), ["Error"],
+                "stderr alone is the only stream")
+    Check.equal(config(out: "/tmp/a.log", err: "/tmp/e.log").logStreams.map(\.title),
+                ["Output", "Error"],
+                "distinct paths are two streams")
+    Check.equal(config(out: "/tmp/a.log", err: "/tmp/a.log").logStreams.map(\.title), ["Log"],
+                "both keys on one file is a single log, not two")
+    Check.equal(config(out: "/tmp/a.log", err: "/tmp/a.log").logStreams.map(\.path),
+                ["/tmp/a.log"],
+                "the collapsed stream keeps the shared path")
 }
 
 // MARK: - Plist round trip

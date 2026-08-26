@@ -2,9 +2,9 @@ import LaunchdCore
 import SwiftUI
 
 struct ContentView: View {
-    @State private var model = JobsModel()
-    @State private var detailJob: JobListEntry?
-    @State private var editingJob: LaunchdJob?
+    @Environment(JobsModel.self) private var model
+    @Environment(\.openWindow) private var openWindow
+
     @State private var creatingJob = false
     @State private var deleteTarget: JobListEntry?
 
@@ -17,7 +17,11 @@ struct ContentView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
+        // The model arrives from the environment, so a local @Bindable is what supplies
+        // the `$model.search` binding the search field needs.
+        @Bindable var model = model
+
+        return NavigationSplitView {
             List(selection: filterSelection) {
                 Section("Source") {
                     ForEach(SourceFilter.allCases, id: \.self) { filter in
@@ -47,7 +51,7 @@ struct ContentView: View {
                         Task { await model.perform { try JobService.kickstartJob(label: job.label, plistPath: job.plistPath) } }
                     },
                     onDelete: { deleteTarget = $0 },
-                    onSelect: { detailJob = $0 },
+                    onSelect: { openWindow(id: DetailWindow.id, value: $0.plistPath) },
                     onReveal: { job in try? JobService.revealInFinder(path: job.plistPath) }
                 )
             }
@@ -63,7 +67,6 @@ struct ContentView: View {
                 .help("Refresh")
 
                 Button {
-                    editingJob = nil
                     creatingJob = true
                 } label: {
                     Label("New Agent", systemImage: "plus")
@@ -76,25 +79,9 @@ struct ContentView: View {
             }
         }
         .task { await model.refresh() }
-        .sheet(item: $detailJob) { job in
-            JobDetailView(plistPath: job.plistPath) { loaded in
-                detailJob = nil
-                editingJob = loaded
-            }
-        }
         .sheet(isPresented: $creatingJob) {
             JobFormView(editingJob: nil) { config, _ in
                 _ = try JobService.createJob(label: config.label, config: config)
-                Task { await model.refresh() }
-            }
-        }
-        .sheet(item: $editingJob) { job in
-            JobFormView(editingJob: job) { config, plistPath in
-                if let plistPath {
-                    try JobService.saveJob(plistPath: plistPath, config: config)
-                } else {
-                    _ = try JobService.createJob(label: config.label, config: config)
-                }
                 Task { await model.refresh() }
             }
         }

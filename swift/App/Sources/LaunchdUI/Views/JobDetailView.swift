@@ -3,97 +3,167 @@ import SwiftUI
 
 struct JobDetailView: View {
     var plistPath: String
-    var onEdit: (LaunchdJob) -> Void
 
-    @Environment(\.dismiss) private var dismiss
+    @Environment(JobsModel.self) private var model
     @State private var job: LaunchdJob?
     @State private var loadError: String?
     @State private var tab = DetailTab.configuration
+    @State private var editing: LaunchdJob?
 
-    enum DetailTab: String, CaseIterable {
-        case configuration = "Configuration"
-        case logs = "Logs"
-        case commands = "Commands"
+    /// A log tab carries its path so the selection survives the strip being rebuilt.
+    enum DetailTab: Hashable {
+        case configuration
+        case log(String)
+        case commands
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header
-            Divider()
-
+        Group {
             if let job {
-                Picker("", selection: $tab) {
-                    ForEach(DetailTab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .padding(12)
-
-                ScrollView {
-                    Group {
-                        switch tab {
-                        case .configuration: ConfigurationTab(job: job)
-                        case .logs: LogsTab(config: job.plist)
-                        case .commands: CommandPanelView(job: job)
-                        }
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
+                content(for: job)
             } else if let loadError {
-                Text(loadError).foregroundStyle(.red).padding()
+                ContentUnavailableView(
+                    "Could not load agent",
+                    systemImage: "exclamationmark.triangle",
+                    description: Text(loadError))
             } else {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .frame(width: 640, height: 620)
-        .task {
-            // jobDetail spawns `launchctl list`, so it must not run on the main actor.
-            let path = plistPath
-            do { job = try await Task.detached { try JobService.jobDetail(plistPath: path) }.value }
-            catch { loadError = error.localizedDescription }
+        // A floor rather than a fixed size: this is a real window now, so the user
+        // resizes it and a long argument list or a wide log line has somewhere to go.
+        .frame(minWidth: 660, minHeight: 460)
+        .navigationTitle(job?.label ?? "Loading…")
+        .toolbar { toolbarContent }
+        .task { await load() }
+        // Presented from this window, so dismissing the form returns here rather than
+        // dropping the user back to the job list.
+        .sheet(item: $editing) { target in
+            JobFormView(editingJob: target) { config, path in
+                if let path {
+                    try JobService.saveJob(plistPath: path, config: config)
+                } else {
+                    _ = try JobService.createJob(label: config.label, config: config)
+                }
+                Task {
+                    await model.refresh()
+                    await load()
+                }
+            }
         }
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(job?.label ?? "Loading...")
-                    .font(.headline)
-                    .textSelection(.enabled)
-                Spacer()
-                Button("Done") { dismiss() }
-            }
+    @ViewBuilder
+    private func content(for job: LaunchdJob) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            summary(for: job)
+            Divider()
 
-            if let job {
-                HStack(spacing: 10) {
-                    StatusBadge(status: job.status)
-                    if let pid = job.pid {
-                        Text("PID: \(pid)").font(.caption).foregroundStyle(.secondary)
-                    }
-                    if let exit = job.lastExitCode {
-                        Text("Exit: \(exit)").font(.caption).foregroundStyle(.secondary)
-                    }
-                    if let lastRun = job.lastRunAt {
-                        Text("Last run: \(Date(timeIntervalSince1970: lastRun / 1000).formatted())")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-
-                HStack(spacing: 8) {
-                    if job.source == .userAgent {
-                        Button("Edit") { onEdit(job) }
-                    }
-                    Button {
-                        try? JobService.revealInFinder(path: job.plistPath)
-                    } label: {
-                        Label("Reveal", systemImage: "folder")
-                    }
-                }
+            switch tab {
+            case .configuration:
+                scrolling { ConfigurationTab(job: job) }
+            case .commands:
+                scrolling { CommandPanelView(job: job) }
+            case .log(let path):
+                // The log view scrolls itself; nesting it in another scroll view would
+                // give the pane two scrollers and no way to reach the bottom.
+                LogViewerView(logPath: path)
+                    .padding(12)
             }
         }
-        .padding(12)
+    }
+
+    private func scrolling(@ViewBuilder _ content: () -> some View) -> some View {
+        ScrollView {
+            content()
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// The window title already carries the label, so this row is only the live state.
+    private func summary(for job: LaunchdJob) -> some View {
+        HStack(spacing: 10) {
+            StatusBadge(status: job.status)
+            if let pid = job.pid {
+                // verbatim: a plain interpolation would group the digits into "4,211".
+                Text(verbatim: "PID \(pid)")
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            if let exit = job.lastExitCode {
+                Text(verbatim: "Exit \(exit)")
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            if let lastRun = job.lastRunAt {
+                let stamp = Date(timeIntervalSince1970: lastRun / 1000)
+                    .formatted(date: .abbreviated, time: .shortened)
+                Text("Last run \(stamp)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 12)
+
+            // Riding the status row rather than a row of their own, and out of the
+            // toolbar: the tab strip plus these two plus a long label overflow the
+            // toolbar at the width the window opens at.
+            if job.source == .userAgent {
+                Button { editing = job } label: {
+                    Label("Edit", systemImage: "pencil")
+                }
+                .help("Edit this agent")
+            }
+            Button {
+                try? JobService.revealInFinder(path: job.plistPath)
+            } label: {
+                Label("Reveal", systemImage: "folder")
+            }
+            .help("Reveal the plist in Finder")
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+    }
+
+    /// Tabs and the two actions live in the window's own toolbar, so neither costs a
+    /// row of the pane.
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        if let job {
+            ToolbarItem(placement: .principal) {
+                Picker("View", selection: $tab) {
+                    Text("Configuration").tag(DetailTab.configuration)
+                    ForEach(job.plist.logStreams) { log in
+                        Text(log.title).tag(DetailTab.log(log.path))
+                    }
+                    Text("Commands").tag(DetailTab.commands)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
+        }
+    }
+
+    private func load() async {
+        let path = plistPath
+        do {
+            // jobDetail spawns `launchctl list`, so it must not run on the main actor.
+            let loaded = try await Task.detached {
+                try JobService.jobDetail(plistPath: path)
+            }.value
+            job = loaded
+            // An edit can retarget or drop a log file, which would leave the selection
+            // pointing at a tab that no longer exists.
+            if case .log(let selected) = tab,
+               !loaded.plist.logStreams.contains(where: { $0.path == selected }) {
+                tab = .configuration
+            }
+        } catch {
+            loadError = error.localizedDescription
+        }
     }
 }
 
@@ -176,31 +246,6 @@ private struct ConfigurationTab: View {
                             .font(.system(.caption, design: .monospaced))
                             .foregroundStyle(.secondary)
                     }
-                }
-            }
-        }
-    }
-}
-
-private struct LogsTab: View {
-    var config: PlistConfig
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            if config.standardOutPath == nil && config.standardErrorPath == nil {
-                Text("No log paths configured for this agent")
-                    .font(.callout).foregroundStyle(.secondary)
-            }
-            if let out = config.standardOutPath {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Standard Output").font(.callout.weight(.medium))
-                    LogViewerView(logPath: out)
-                }
-            }
-            if let err = config.standardErrorPath {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Standard Error").font(.callout.weight(.medium))
-                    LogViewerView(logPath: err)
                 }
             }
         }

@@ -4,9 +4,14 @@ import SwiftUI
 
 @main
 struct LaunchdUIApp: App {
+    // The detail windows are separate scenes, so the job list can no longer be owned by
+    // ContentView: saving an edit from a detail window has to refresh the main list.
+    @State private var model = JobsModel()
+
     var body: some Scene {
         Window("Launchd UI", id: "main") {
             ContentView()
+                .environment(model)
         }
         .windowToolbarStyle(.unified)
         .commands {
@@ -23,7 +28,24 @@ struct LaunchdUIApp: App {
                     .keyboardShortcut("g", modifiers: [.command, .shift])
             }
         }
+
+        // Keyed by plist path, so asking for the same job twice raises the window that is
+        // already open instead of stacking duplicates -- the Get Info behaviour.
+        WindowGroup(id: DetailWindow.id, for: String.self) { $plistPath in
+            if let plistPath {
+                JobDetailView(plistPath: plistPath)
+                    .environment(model)
+            }
+        }
+        // A request, not a guarantee: macOS opens these narrower than this, which is
+        // why only the tab strip is asked to fit in the toolbar.
+        .defaultSize(width: 880, height: 620)
+        .windowToolbarStyle(.unified)
     }
+}
+
+enum DetailWindow {
+    static let id = "job-detail"
 }
 
 /// performTextFinderAction(_:) picks its action off the sender's `tag`, so the command
