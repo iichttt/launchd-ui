@@ -1,3 +1,4 @@
+import AppKit
 import LaunchdCore
 import SwiftUI
 
@@ -42,16 +43,8 @@ struct LogViewerView: View {
             if let error {
                 Text(error).font(.callout).foregroundStyle(.red)
             } else {
-                ScrollView {
-                    Text(content.isEmpty ? "(empty)" : content)
-                        .font(.system(.caption, design: .monospaced))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(8)
-                }
-                .frame(height: 220)
-                .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary.opacity(0.3)))
-                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
+                LogTextView(text: content.isEmpty ? "(empty)" : content)
+                    .frame(height: 220)
             }
         }
         .task { await load() }
@@ -83,5 +76,41 @@ struct LogViewerView: View {
         return String(
             format: "%d/%d %02d:%02d:%02d",
             c.month ?? 0, c.day ?? 0, c.hour ?? 0, c.minute ?? 0, c.second ?? 0)
+    }
+}
+
+/// AppKit's text view, so the log gets the real control: a find bar on Cmd-F, native
+/// selection, and line-based layout instead of the whole file laid out as one `Text`.
+/// Its own bezel replaces the rounded rectangle that used to imitate one.
+struct LogTextView: NSViewRepresentable {
+    var text: String
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSTextView.scrollableTextView()
+        scrollView.borderType = .bezelBorder
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+
+        guard let textView = scrollView.documentView as? NSTextView else { return scrollView }
+        textView.isEditable = false
+        textView.isRichText = false
+        textView.isSelectable = true
+        textView.usesFindBar = true
+        textView.isIncrementalSearchingEnabled = true
+        textView.font = .monospacedSystemFont(
+            ofSize: NSFont.smallSystemFontSize, weight: .regular)
+        textView.textContainerInset = NSSize(width: 6, height: 6)
+        textView.backgroundColor = .textBackgroundColor
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        guard let textView = scrollView.documentView as? NSTextView else { return }
+        // Re-setting the string drops selection and scroll position, so only do it when
+        // the log actually changed.
+        guard textView.string != text else { return }
+        textView.string = text
+        // A log reads newest-last, so open at the end rather than the top.
+        textView.scrollToEndOfDocument(nil)
     }
 }
