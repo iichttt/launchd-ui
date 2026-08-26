@@ -12,31 +12,88 @@ struct JobListView: View {
     var onSelect: (JobListEntry) -> Void
     var onReveal: (JobListEntry) -> Void
 
+    @State private var selection = Set<JobListEntry.ID>()
+    @State private var sortOrder = [KeyPathComparator(\JobListEntry.label)]
+
+    private var sorted: [JobListEntry] { jobs.sorted(using: sortOrder) }
+
     var body: some View {
         if loading {
             centeredMessage("Loading agents...")
         } else if jobs.isEmpty {
             centeredMessage("No agents found")
         } else {
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    JobListHeader()
-                    ForEach(jobs) { job in
-                        JobRowView(
-                            job: job,
-                            onStart: onStart,
-                            onStop: onStop,
-                            onRestart: onRestart,
-                            onKickstart: onKickstart,
-                            onDelete: onDelete,
-                            onSelect: onSelect,
-                            onReveal: onReveal
-                        )
+            Table(sorted, selection: $selection, sortOrder: $sortOrder) {
+                TableColumn("Label", value: \.label) { job in
+                    Text(job.label)
+                        .font(.callout)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .help(job.plistPath)
+                }
+
+                TableColumn("Source", value: \.sortableSource) { job in
+                    SourceBadge(source: job.source)
+                }
+                .width(JobColumn.source)
+
+                TableColumn("Status", value: \.sortableStatus) { job in
+                    StatusBadge(status: job.status)
+                }
+                .width(JobColumn.status)
+
+                TableColumn("PID", value: \.sortablePID) { job in
+                    Text(job.pid.map(String.init) ?? "—")
+                        .font(.system(.callout, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+                .width(JobColumn.pid)
+
+                TableColumn("Last Run", value: \.sortableLastRun) { job in
+                    Text(job.lastRunAt.map(formatRelativeTime) ?? "—")
+                        .font(.callout.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+                .width(JobColumn.lastRun)
+
+                TableColumn("Actions") { job in
+                    JobRowActions(
+                        job: job,
+                        onStart: onStart,
+                        onStop: onStop,
+                        onRestart: onRestart,
+                        onKickstart: onKickstart,
+                        onDelete: onDelete,
+                        onSelect: onSelect,
+                        onReveal: onReveal
+                    )
+                }
+                .width(JobColumn.actions)
+            }
+            // primaryAction is the Table's double-click handler; the same items back
+            // the right-click menu, so both routes reach every action.
+            .contextMenu(forSelectionType: JobListEntry.ID.self) { ids in
+                if let job = job(for: ids) {
+                    Button("Details") { onSelect(job) }
+                    Button("Test Run") { onKickstart(job) }
+                        .disabled(job.source != .userAgent)
+                    Button("Reveal in Finder") { onReveal(job) }
+                    if job.source == .userAgent {
                         Divider()
+                        Button("Delete", role: .destructive) { onDelete(job) }
                     }
                 }
+            } primaryAction: { ids in
+                if let job = job(for: ids) { onSelect(job) }
             }
         }
+    }
+
+    private func job(for ids: Set<JobListEntry.ID>) -> JobListEntry? {
+        guard let id = ids.first else { return nil }
+        return jobs.first { $0.id == id }
     }
 
     private func centeredMessage(_ text: String) -> some View {
@@ -49,8 +106,16 @@ struct JobListView: View {
     }
 }
 
-/// Column widths are shared between the header and every row so the list lines up
-/// without a real Table (which cannot host per-row action buttons cleanly).
+/// Table sorting needs a Comparable key path per column, which the badge-backed
+/// enums and the optional numeric fields do not provide directly.
+extension JobListEntry {
+    var sortableSource: String { source.rawValue }
+    var sortableStatus: String { status.rawValue }
+    /// Unset sorts below every real pid rather than above it.
+    var sortablePID: Int { pid ?? -1 }
+    var sortableLastRun: Double { lastRunAt ?? 0 }
+}
+
 enum JobColumn {
     static let source: CGFloat = 70
     static let status: CGFloat = 80
@@ -59,25 +124,7 @@ enum JobColumn {
     static let actions: CGFloat = 150
 }
 
-struct JobListHeader: View {
-    var body: some View {
-        HStack(spacing: 8) {
-            Text("Label").frame(maxWidth: .infinity, alignment: .leading)
-            Text("Source").frame(width: JobColumn.source, alignment: .leading)
-            Text("Status").frame(width: JobColumn.status, alignment: .leading)
-            Text("PID").frame(width: JobColumn.pid, alignment: .trailing)
-            Text("Last Run").frame(width: JobColumn.lastRun, alignment: .trailing)
-            Text("Actions").frame(width: JobColumn.actions, alignment: .leading)
-        }
-        .font(.caption.weight(.semibold))
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(.quaternary.opacity(0.3))
-    }
-}
-
-struct JobRowView: View {
+struct JobRowActions: View {
     var job: JobListEntry
     var onStart: (JobListEntry) -> Void
     var onStop: (JobListEntry) -> Void
@@ -87,48 +134,11 @@ struct JobRowView: View {
     var onSelect: (JobListEntry) -> Void
     var onReveal: (JobListEntry) -> Void
 
-    @State private var hovering = false
-
     /// launchd job control is rejected for anything outside ~/Library/LaunchAgents, so the
     /// controls are disabled rather than allowed to fail.
     private var isUserAgent: Bool { job.source == .userAgent }
 
     var body: some View {
-        HStack(spacing: 8) {
-            Text(job.label)
-                .font(.callout)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            SourceBadge(source: job.source)
-                .frame(width: JobColumn.source, alignment: .leading)
-
-            StatusBadge(status: job.status)
-                .frame(width: JobColumn.status, alignment: .leading)
-
-            Text(job.pid.map(String.init) ?? "—")
-                .font(.callout.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .frame(width: JobColumn.pid, alignment: .trailing)
-
-            Text(job.lastRunAt.map(formatRelativeTime) ?? "—")
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .frame(width: JobColumn.lastRun, alignment: .trailing)
-
-            actions.frame(width: JobColumn.actions, alignment: .leading)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(hovering ? Color.secondary.opacity(0.08) : .clear)
-        .contentShape(Rectangle())
-        .onTapGesture { onSelect(job) }
-        .onHover { hovering = $0 }
-    }
-
-    @ViewBuilder
-    private var actions: some View {
         HStack(spacing: 2) {
             if job.status == .running || job.status == .loaded {
                 iconButton("stop.fill", help: isUserAgent
