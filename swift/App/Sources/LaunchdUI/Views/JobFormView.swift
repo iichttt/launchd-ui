@@ -75,35 +75,27 @@ struct JobFormView: View {
         VStack(spacing: 0) {
             Form {
                 Section {
-                    LabeledContent("Label") {
-                        VStack(alignment: .leading, spacing: 4) {
-                            TextField("com.example.my-agent", text: Binding(
-                                get: { config.label },
-                                set: { newValue in
-                                    // launchd labels cannot contain whitespace.
-                                    let label = newValue.filter { !$0.isWhitespace }
-                                    config.label = label
-                                    // Creating a new agent pre-fills log paths from the
-                                    // label, matching the upstream form's convenience.
-                                    if !isEditing, !label.isEmpty {
-                                        let logDir = PlistStore.homeDirectory
-                                            .appending(path: "Library/Logs/launchd-ui").path
-                                        config.standardOutPath = "\(logDir)/\(label).stdout.log"
-                                        config.standardErrorPath = "\(logDir)/\(label).stderr.log"
-                                    }
-                                }
-                            ))
-                            .disabled(isEditing)
-                            caption("Unique identifier. Use reverse domain notation (e.g. com.yourname.task).")
+                    // A field's own title becomes the row label in a grouped Form, so these
+                    // need neither a LabeledContent wrapper nor a placeholder to be labelled.
+                    TextField("Label", text: Binding(
+                        get: { config.label },
+                        set: { newValue in
+                            // launchd labels cannot contain whitespace.
+                            let label = newValue.filter { !$0.isWhitespace }
+                            config.label = label
+                            // Creating a new agent pre-fills log paths from the
+                            // label, matching the upstream form's convenience.
+                            if !isEditing, !label.isEmpty {
+                                let logDir = PlistStore.homeDirectory
+                                    .appending(path: "Library/Logs/launchd-ui").path
+                                config.standardOutPath = "\(logDir)/\(label).stdout.log"
+                                config.standardErrorPath = "\(logDir)/\(label).stderr.log"
+                            }
                         }
-                    }
+                    ))
+                    .disabled(isEditing)
 
-                    LabeledContent("Program Arguments") {
-                        VStack(alignment: .leading, spacing: 4) {
-                            TextField("/usr/bin/my-program --flag value", text: $argumentsText)
-                            caption("The command to execute, then its arguments. Quote arguments containing spaces.")
-                        }
-                    }
+                    TextField("Program Arguments", text: $argumentsText)
                 }
 
                 Section("Startup") {
@@ -134,11 +126,18 @@ struct JobFormView: View {
                         EmptyView()
 
                     case .interval:
+                        // The unit was the one thing the help text carried that the row
+                        // itself did not, so it moves in beside the field.
                         LabeledContent("Every") {
-                            VStack(alignment: .leading, spacing: 4) {
-                                TextField("300", text: $intervalSeconds)
-                                    .frame(width: 100)
-                                caption("Seconds. 300 = every 5 minutes, 3600 = every hour.")
+                            HStack(spacing: 6) {
+                                // An empty title would still emit an (empty) label element;
+                                // a real label kept out of sight names the field for
+                                // VoiceOver without drawing placeholder text in it.
+                                TextField(text: $intervalSeconds) { Text("Interval in seconds") }
+                                    .labelsHidden()
+                                    .frame(width: 80)
+                                Text("seconds")
+                                    .foregroundStyle(.secondary)
                             }
                         }
 
@@ -188,13 +187,6 @@ struct JobFormView: View {
 
     // MARK: - Fields
 
-    private func caption(_ text: String) -> some View {
-        Text(text)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-    }
-
     @ViewBuilder
     private var calendarRows: some View {
         Picker("Hour", selection: Binding(
@@ -223,9 +215,6 @@ struct JobFormView: View {
                 get: { hourFrom }, set: { hourFrom = $0 ?? 0 }), placeholder: "7")
             numberField("To hour", value: Binding(
                 get: { hourTo }, set: { hourTo = $0 ?? 0 }), placeholder: "23")
-            LabeledContent("") {
-                caption("Runs every hour in this range (7 to 23 = 7:00, 8:00, … 23:00).")
-            }
         case .every:
             EmptyView()
         }
@@ -271,10 +260,19 @@ struct JobFormView: View {
         _ title: String, value: Binding<Int?>, placeholder: String
     ) -> some View {
         LabeledContent(title) {
-            TextField(placeholder, text: Binding(
-                get: { value.wrappedValue.map(String.init) ?? "" },
-                set: { value.wrappedValue = Int($0) }
-            ))
+            // `prompt:` is a true placeholder and clears the moment a value is typed.
+            // Passing the same text as the field's *title* instead draws a permanent
+            // label beside a field that already shows the number -- which reads as two
+            // fields on one row.
+            TextField(
+                text: Binding(
+                    get: { value.wrappedValue.map(String.init) ?? "" },
+                    set: { value.wrappedValue = Int($0) }),
+                prompt: Text(placeholder)
+            ) {
+                Text(title)
+            }
+            .labelsHidden()
             .frame(width: 80)
         }
     }
