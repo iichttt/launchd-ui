@@ -241,6 +241,66 @@ Check.suite("command builder") {
                  "remove is marked destructive")
 }
 
+// MARK: - Flag discovery
+
+Check.suite("flag discovery") {
+    // The real --help of the user's plex-tmdb-artwork script, which is the shape this
+    // parser was built against.
+    let help = """
+        plex-tmdb-artwork - apply TMDB's own poster and backdrop as Plex's artwork
+
+        Usage: plex-tmdb-artwork.js [options]
+
+          --library NAME     Limit to a library by name; repeatable. Default: all.
+          --include-locked   Also overwrite artwork you locked manually in Plex.
+          --poster           Only update posters.
+          --no-seasons       Skip TV season posters (they are on by default).
+          --force            Re-apply even when the chosen image is already in place.
+          --dry-run          Report what would change without modifying anything.
+          --limit N          Process at most N items per library (for testing).
+          -v, --verbose      Verbose output.
+          -h, --help         Show this help.
+
+        --reset-state discards the record of which locks are this script's, so anything
+        it has already applied will read as a manual lock afterwards.
+        """
+
+    let flags = FlagDiscovery.parse(help: help)
+    Check.equal(flags.map(\.name),
+                ["--library", "--include-locked", "--poster", "--no-seasons", "--force",
+                 "--dry-run", "--limit", "--verbose"],
+                "every option is found, in the order the program lists them")
+    Check.expect(flags.first { $0.name == "--help" } == nil, "--help is not offered back")
+    Check.expect(flags.first { $0.name == "--reset-state" } == nil,
+                 "an unindented mention in prose is not an option")
+
+    Check.equal(flags.first { $0.name == "--library" }?.valuePlaceholder, "NAME",
+                "an option taking a value keeps the program's placeholder")
+    Check.equal(flags.first { $0.name == "--limit" }?.valuePlaceholder, "N",
+                "single-letter placeholders count too")
+    Check.equal(flags.first { $0.name == "--force" }?.valuePlaceholder, nil,
+                "a boolean option takes no value")
+    Check.equal(flags.first { $0.name == "--dry-run" }?.summary,
+                "Report what would change without modifying anything.",
+                "the description is carried across")
+    Check.equal(flags.first { $0.name == "--verbose" }?.name, "--verbose",
+                "the long form wins over the short alias")
+
+    // Shapes other programs use.
+    Check.equal(FlagDiscovery.parse(help: "  --limit=N    Cap it.").first?.valuePlaceholder, "N",
+                "--flag=VALUE is the same as --flag VALUE")
+    Check.equal(FlagDiscovery.parse(help: "  --out <FILE>   Where to write.").first?.valuePlaceholder,
+                "FILE", "angle brackets are stripped from the placeholder")
+    Check.equal(FlagDiscovery.parse(help: "  -f, --force   Do it.").first?.name, "--force",
+                "short-then-long is read as the long form")
+    Check.equal(FlagDiscovery.parse(help: "  -q   Quiet.").first?.name, "-q",
+                "a short-only option is still offered")
+    Check.equal(FlagDiscovery.parse(help: "no options here at all").map(\.name), [],
+                "text with no options yields nothing")
+    Check.equal(FlagDiscovery.parse(help: "  --force   One.\n  --force   Two.").map(\.name),
+                ["--force"], "a repeated option is listed once")
+}
+
 // MARK: - Log streams
 
 Check.suite("log streams") {

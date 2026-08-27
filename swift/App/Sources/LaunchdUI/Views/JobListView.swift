@@ -77,7 +77,7 @@ struct JobListView: View {
             .contextMenu(forSelectionType: JobListEntry.ID.self) { ids in
                 if let job = job(for: ids) {
                     Button("Details") { onSelect(job) }
-                    Button("Test Run") { onKickstart(job) }
+                    Button("Run Now") { onKickstart(job) }
                         .disabled(job.source != .userAgent)
                     Button("Reveal in Finder") { onReveal(job) }
                     if job.source == .userAgent {
@@ -160,7 +160,7 @@ struct JobRowActions: View {
             }
 
             Menu {
-                Button("Test Run") { onKickstart(job) }
+                Button("Run Now") { onKickstart(job) }
                     .disabled(!isUserAgent)
                 Button("Details") { onSelect(job) }
                 Button("Reveal in Finder") { onReveal(job) }

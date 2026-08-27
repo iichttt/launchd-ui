@@ -237,6 +237,56 @@ public enum JobService {
         try Data().write(to: URL(fileURLWithPath: path))
     }
 
+    /// Runs the job's program directly with extra arguments appended, and returns the pid.
+    ///
+    /// launchctl cannot pass arguments to a job, so a run with options is necessarily
+    /// outside launchd: this does not touch the job's loaded state, and the pid and last
+    /// exit status the list shows are launchd's, not this run's. Output is appended to
+    /// the job's own log files so the Logs tab still shows it.
+    @discardableResult
+    public static func runProgram(config: PlistConfig, extraArguments: [String]) throws -> Int32 {
+        guard let arguments = config.programArguments, let executable = arguments.first else {
+            throw AppError.notFound("this job has no program to run")
+        }
+        guard FileManager.default.isExecutableFile(atPath: executable) else {
+            // AppError.notFound already says "file not found", so the path alone reads
+            // cleanly instead of stuttering the phrase twice.
+            throw AppError.notFound(executable)
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = Array(arguments.dropFirst()) + extraArguments
+        if let directory = config.workingDirectory {
+            process.currentDirectoryURL = URL(fileURLWithPath: directory)
+        }
+        process.environment = FlagDiscovery.environment(for: config)
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = appendHandle(config.standardOutPath) ?? FileHandle.nullDevice
+        process.standardError = appendHandle(config.standardErrorPath) ?? FileHandle.nullDevice
+
+        do {
+            try process.run()
+        } catch {
+            throw AppError.io("could not run \(executable): \(error.localizedDescription)")
+        }
+        // Deliberately not waited on: these runs can be long, and launchd would not block
+        // either. The exit shows up in the log the output was appended to.
+        return process.processIdentifier
+    }
+
+    /// A handle positioned at the end of the log, so a manual run adds to the history
+    /// rather than replacing it. Nil when there is no path or it cannot be opened.
+    private static func appendHandle(_ path: String?) -> FileHandle? {
+        guard let path else { return nil }
+        if !FileManager.default.fileExists(atPath: path) {
+            FileManager.default.createFile(atPath: path, contents: nil)
+        }
+        guard let handle = FileHandle(forWritingAtPath: path) else { return nil }
+        handle.seekToEndOfFile()
+        return handle
+    }
+
     public static func openLogInEditor(path: String) throws {
         try Launchctl.run("/usr/bin/open", ["-t", path])
     }

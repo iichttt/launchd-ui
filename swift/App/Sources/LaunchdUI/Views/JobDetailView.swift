@@ -14,6 +14,7 @@ struct JobDetailView: View {
     enum DetailTab: Hashable {
         case configuration
         case log(String)
+        case flags
         case commands
     }
 
@@ -30,9 +31,12 @@ struct JobDetailView: View {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        // A floor rather than a fixed size: this is a real window now, so the user
-        // resizes it and a long argument list or a wide log line has somewhere to go.
-        .frame(minWidth: 660, minHeight: 460)
+        // The floor is what the toolbar needs: below roughly this width the five-tab
+        // strip and the job's label stop fitting and macOS folds the whole toolbar
+        // into an overflow menu. `.defaultSize` and an ideal width are both ignored
+        // for this scene, but the content's minimum is honoured, so it sets the
+        // opening width too.
+        .frame(minWidth: 860, minHeight: 460)
         .navigationTitle(job?.label ?? "Loading…")
         .toolbar { toolbarContent }
         .task { await load() }
@@ -62,6 +66,9 @@ struct JobDetailView: View {
             switch tab {
             case .configuration:
                 scrolling { ConfigurationTab(job: job) }
+            case .flags:
+                // Brings its own Form, which scrolls itself.
+                FlagsTab(job: job)
             case .commands:
                 scrolling { CommandPanelView(job: job) }
             case .log(let path):
@@ -133,12 +140,14 @@ struct JobDetailView: View {
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         if let job {
-            ToolbarItem(placement: .principal) {
+            // .primaryAction rides the trailing edge; .principal would centre it.
+            ToolbarItem(placement: .primaryAction) {
                 Picker("View", selection: $tab) {
                     Text("Configuration").tag(DetailTab.configuration)
                     ForEach(job.plist.logStreams) { log in
                         Text(log.title).tag(DetailTab.log(log.path))
                     }
+                    Text("Flags").tag(DetailTab.flags)
                     Text("Commands").tag(DetailTab.commands)
                 }
                 .pickerStyle(.segmented)

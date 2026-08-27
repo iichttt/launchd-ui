@@ -6,6 +6,7 @@ struct ContentView: View {
     @Environment(\.openWindow) private var openWindow
 
     @State private var creatingJob = false
+    @State private var runTarget: JobListEntry?
     @State private var deleteTarget: JobListEntry?
 
     /// List selection is optional; the model's filter is not, so a nil selection
@@ -48,7 +49,14 @@ struct ContentView: View {
                     onStop: { job in Task { await model.perform { try JobService.stopJob(plistPath: job.plistPath) } } },
                     onRestart: { job in Task { await model.perform { try JobService.restartJob(plistPath: job.plistPath) } } },
                     onKickstart: { job in
-                        Task { await model.perform { try JobService.kickstartJob(label: job.label, plistPath: job.plistPath) } }
+                        // A dialog is only worth showing once options have been chosen
+                        // for this job; otherwise Run Now stays the launchd kickstart
+                        // it has always been.
+                        if FlagStore.offeredFlags(for: job.label).isEmpty {
+                            Task { await model.perform { try JobService.kickstartJob(label: job.label, plistPath: job.plistPath) } }
+                        } else {
+                            runTarget = job
+                        }
                     },
                     onDelete: { deleteTarget = $0 },
                     onSelect: { openWindow(id: DetailWindow.id, value: $0.plistPath) },
@@ -79,6 +87,9 @@ struct ContentView: View {
             }
         }
         .task { await model.refresh() }
+        .sheet(item: $runTarget) { job in
+            RunOptionsSheet(entry: job)
+        }
         .sheet(isPresented: $creatingJob) {
             JobFormView(editingJob: nil) { config, _ in
                 _ = try JobService.createJob(label: config.label, config: config)
